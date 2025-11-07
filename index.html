@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grabpy </title>
+<link rel="stylesheet" href="main.css">
+<link rel="icon" href="Logo.png" type="image/png">  
+</head>
+<body>
+
+<div id="top-bar">
+  <button id="run">Run</button>
+  <button id="clear">Clear</button>
+</div>
+
+<div id="container">
+  <div id="palette">
+    <!-- Variable and Input -->
+    <div class="block" data-type="print">Print<input data-field="expr" placeholder="text/variable"></div>
+    <div class="block" data-type="set">Set<input data-field="name" placeholder="variable"> = <input data-field="value" placeholder="value"></div>
+    <div class="block" data-type="input">Input<input data-field="name" placeholder="variable"> Prompt: <input data-field="prompt"></div>
+    <div class="block" data-type="expr">Expression<input data-field="expr" placeholder="x = x + 1"></div>
+
+    <!-- Flow control -->
+    <div class="block" data-type="if">If<input data-field="cond" placeholder="condition"><div class="body-slot"></div></div>
+    <div class="block" data-type="elif">Elif<input data-field="cond" placeholder="condition"><div class="body-slot"></div></div>
+    <div class="block" data-type="else">Else<div class="body-slot"></div></div>
+    <div class="block" data-type="for">For<input data-field="var" placeholder="i"> in <input data-field="iter" placeholder="range(5)"><div class="body-slot"></div></div>
+    <div class="block" data-type="while">While<input data-field="cond" placeholder="condition"><div class="body-slot"></div></div>
+
+    <!-- List / Dict creation -->
+    <div class="block" data-type="list-create">List Create<input data-field="name" placeholder="listName"> = <input data-field="items" placeholder="1,2,3"></div>
+    <div class="block" data-type="dict-create">Dict Create<input data-field="name" placeholder="dictName"> = <input data-field="items" placeholder='{"x":1,"y":[2,3]}'> </div>
+
+    <!-- List operations -->
+    <div class="block" data-type="list-append">List Append<input data-field="name" placeholder="listName"> Value: <input data-field="value"></div>
+    <div class="block" data-type="list-pop">List Pop<input data-field="name" placeholder="listName"></div>
+    <div class="block" data-type="list-remove">List Remove<input data-field="name" placeholder="listName"> Value: <input data-field="value"></div>
+    <div class="block" data-type="list-reverse">List Reverse<input data-field="name" placeholder="listName"></div>
+
+    <!-- Dict operations -->
+    <div class="block" data-type="dict-pop">Dict Pop<input data-field="name" placeholder="dictName"> Key: <input data-field="key"></div>
+    <div class="block" data-type="dict-update">Dict Update<input data-field="name" placeholder="dictName"> Items: <input data-field="items" placeholder='{"key":value}'></div>
+    <div class="block" data-type="dict-delete">Dict Delete<input data-field="name" placeholder="dictName"> Key: <input data-field="key"></div>
+
+    <!-- Functions -->
+    <div class="block" data-type="func-def">Function<input data-field="name" placeholder="funcName"> Params: <input data-field="params"><div class="body-slot"></div></div>
+    <div class="block" data-type="func-call">Call Function<input data-field="name" placeholder="funcName"> Args: <input data-field="args"></div>
+  </div>
+
+  <div id="board-container">
+    <div id="board"></div>
+    <div id="bottom-panels">
+      <div id="console"></div>
+      <div id="codePreview"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+<script>
+let pyodideReady;
+async function loadPyodideAndPackages(){ pyodideReady=await loadPyodide(); }
+loadPyodideAndPackages();
+
+const palette=document.getElementById('palette');
+const board=document.getElementById('board');
+const consoleEl=document.getElementById('console');
+const codePreview=document.getElementById('codePreview');
+let instanceId=1;
+
+function makeInstance(template){
+  const node=template.cloneNode(true);
+  node.classList.add('instance');
+  node.dataset.id='b'+(instanceId++);
+  const delBtn=document.createElement('button');
+  delBtn.textContent='X';
+  delBtn.classList.add('delete-btn');
+  delBtn.addEventListener('click',()=>{node.remove();updateCodePreview();});
+  node.appendChild(delBtn);
+  node.draggable=true;
+  node.querySelectorAll('.body-slot').forEach(s=>makeDroppable(s));
+  node.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',updateCodePreview));
+  node.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', node.dataset.id); });
+  return node;
+}
+
+function makeDroppable(container){
+  container.addEventListener('dragover', e => e.preventDefault());
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    const data = e.dataTransfer.getData('text/plain');
+    const paletteBlock = [...palette.querySelectorAll('.block')].find(b=>b.dataset.type===data);
+    if(paletteBlock){
+      const inst = makeInstance(paletteBlock);
+      container.appendChild(inst);
+      updateCodePreview();
+    } else {
+      const node=document.querySelector(`[data-id="${data}"]`);
+      if(node && node!==container && !container.contains(node)){
+        container.appendChild(node);
+        updateCodePreview();
+      }
+    }
+  });
+}
+
+palette.querySelectorAll('.block').forEach(tpl=>{
+  tpl.addEventListener('click',()=>{ const inst = makeInstance(tpl); board.appendChild(inst); updateCodePreview(); });
+  tpl.draggable = true;
+  tpl.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', tpl.dataset.type); });
+});
+
+makeDroppable(board);
+
+function generateCode(node, indent=0){
+  const spaces='  '.repeat(indent);
+  const type=node.dataset.type;
+  let code='';
+  if(type==='print') code+=spaces+`print(${node.querySelector('input[data-field="expr"]').value})\n`;
+  else if(type==='set') code+=spaces+`${node.querySelector('input[data-field="name"]').value} = ${node.querySelector('input[data-field="value"]').value}\n`;
+  else if(type==='input') code+=spaces+`${node.querySelector('input[data-field="name"]').value} = input('${node.querySelector('input[data-field="prompt"]').value}')\n`;
+  else if(type==='expr') code+=spaces+`${node.querySelector('input[data-field="expr"]').value}\n`;
+  else if(type==='list-create') code+=spaces+`${node.querySelector('input[data-field="name"]').value} = [${node.querySelector('input[data-field="items"]').value}]\n`;
+  else if(type==='dict-create') code+=spaces+`${node.querySelector('input[data-field="name"]').value} = ${node.querySelector('input[data-field="items"]').value}\n`;
+
+  else if(type==='list-append') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.append(${node.querySelector('input[data-field="value"]').value})\n`;
+  else if(type==='list-pop') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.pop()\n`;
+  else if(type==='list-remove') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.remove(${node.querySelector('input[data-field="value"]').value})\n`;
+  else if(type==='list-reverse') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.reverse()\n`;
+
+  else if(type==='dict-pop') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.pop(${node.querySelector('input[data-field="key"]').value})\n`;
+  else if(type==='dict-update') code+=spaces+`${node.querySelector('input[data-field="name"]').value}.update(${node.querySelector('input[data-field="items"]').value})\n`;
+  else if(type==='dict-delete') code+=spaces+`del ${node.querySelector('input[data-field="name"]').value}[${node.querySelector('input[data-field="key"]').value}]\n`;
+
+  else if(type==='if'){
+    let cond=node.querySelector('input[data-field="cond"]').value || 'True';
+    code+=spaces+`if ${cond}:\n` + [...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  }
+  else if(type==='elif'){
+    let cond=node.querySelector('input[data-field="cond"]').value || 'True';
+    code+=spaces+`elif ${cond}:\n` + [...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  }
+  else if(type==='else'){
+    code+=spaces+`else:\n` + [...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  }
+  else if(type==='for') code+=spaces+`for ${node.querySelector('input[data-field="var"]').value} in ${node.querySelector('input[data-field="iter"]').value}:\n`+[...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  else if(type==='while') {
+    let cond = node.querySelector('input[data-field="cond"]').value || 'False'; 
+    code += spaces+`while ${cond}:\n` + [...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  }
+  else if(type==='func-def') code+=spaces+`def ${node.querySelector('input[data-field="name"]').value}(${node.querySelector('input[data-field="params"]').value}):\n`+[...node.querySelectorAll('.body-slot > .instance')].map(c=>generateCode(c,indent+1)).join('');
+  else if(type==='func-call') code+=spaces+`${node.querySelector('input[data-field="name"]').value}(${node.querySelector('input[data-field="args"]').value})\n`;
+  return code;
+}
+
+function updateCodePreview(){
+  let code='';
+  [...board.querySelectorAll('.instance')].forEach(n=>{
+    if(!n.parentElement.classList.contains('body-slot')) code+=generateCode(n);
+  });
+  codePreview.textContent=code;
+}
+
+async function updateAndRun(){
+    updateCodePreview();
+    const code = codePreview.textContent;
+    consoleEl.textContent = '';
+    try {
+        await pyodideReady.loadPackagesFromImports(code);
+        const wrappedCode = `
+import sys
+from io import StringIO
+_out = StringIO()
+sys.stdout = _out
+try:
+${code.split('\n').map(l => '    ' + l).join('\n')}
+except Exception as e:
+    print(e)
+_out.getvalue()
+`;
+        const output = await pyodideReady.runPythonAsync(wrappedCode);
+        consoleEl.textContent = output;
+    } catch (err) {
+        consoleEl.textContent = err;
+    }
+}
+
+document.getElementById('run').addEventListener('click', updateAndRun);
+document.getElementById('clear').addEventListener('click',()=>{
+  board.querySelectorAll('.instance').forEach(n=>n.remove());
+  consoleEl.textContent='';
+  updateCodePreview();
+});
+</script>
+</body>
+</html>
